@@ -1,38 +1,51 @@
+import logging
 import os
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, NoReturn
 
-from llama_index.core import  Document, Settings
-from llama_index.core.extractors import (
-    QuestionsAnsweredExtractor,
-    SummaryExtractor,
-    KeywordExtractor
-)
+from llama_index.core import  Document, Settings, VectorStoreIndex, StorageContext
+from llama_index.core.extractors import QuestionsAnsweredExtractor, SummaryExtractor
 from llama_index.core.ingestion import IngestionPipeline
 from llama_index.core.node_parser import TokenTextSplitter
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.huggingface import HuggingFaceLLM
+from llama_index.vector_stores.qdrant import QdrantVectorStore
+
+import qdrant_client
 
 import cleaning_utils
 
-def setup():
+def setup() -> NoReturn:
+    """Configure the environment and initialize HuggingFace models for LLM and embeddings."""
     llm = HuggingFaceLLM(
-    context_window=4096,
-    generate_kwargs={"temperature": 0.25, 
-                     "do_sample": True, 
-                     "top_p":0.80
-                     },
-    is_chat_model=True,
-    system_prompt = "You are an AI assistant that follows instructions extremely well. Help as much as you can.",
-    tokenizer_name="Deci/DeciLM-7B-instruct",
-    model_name="Deci/DeciLM-7B-instruct",
-    device_map="xpu",
-    tokenizer_kwargs={"max_length": 4096},
-    model_kwargs={"torch_dtype": "auto",
-                  "trust_remote_code":True
-                 }
+        context_window=4096,
+        generate_kwargs={
+            "temperature": 0.25,
+            "do_sample": True, 
+            "top_p":0.80
+            },
+        is_chat_model=True,
+        system_prompt = "You are an AI assistant that follows instructions extremely well. Help as much as you can.",
+        tokenizer_name="Deci/DeciLM-7B-instruct",
+        model_name="Deci/DeciLM-7B-instruct",
+        device_map="xpu",
+        tokenizer_kwargs={"max_length": 4096},
+        model_kwargs={
+            "torch_dtype": "auto",
+            "trust_remote_code":True
+            }
     )
     
+    embed_model = HuggingFaceEmbedding(
+        model_name="WhereIsAI/UAE-Large-V1",
+        tokenizer_name="Deci/DeciLM-7B-instruct",
+        device="xpu",
+        trust_remote_code=True
+        )
+    
     Settings.llm = llm
+    
+    Settings.embed_model = embed_model
     
 def create_documents_from_clean_text(cleaned_texts: List[Tuple[str, Dict]]) -> List[Document]:
     """
@@ -73,20 +86,21 @@ def create_documents_from_clean_text(cleaned_texts: List[Tuple[str, Dict]]) -> L
     return documents
 
 def create_metadata_extractors():
-    qa_prompt = """ Here is the contentual information for this document:
+    qa_prompt = """ Here is the contextual information from a solution brief by SuperMicro:
     {context_str}
 
-    Given the contextual information, generate {num_questions} questions this context can provide \
+    Given the contextual information, generate {num_questions} to the point questions this context can provide \
     specific answers about the products, software, hardware, and solutions discussed in this document\
     which are unlikely to be found elsewhere.
 
-    Higher-level summaries of the surrounding context may be provided as well.  Try using these summaries to generate better questions that this context can answer."""
+    Higher-level summaries of the surrounding context may be provided as well.  Try using these summaries to generate better questions that this context can answer.\
+    Ensure that your questions are detailed, yet to the point, and are about the specific products, software, hardware, and solutions discussed in this document"""
 
-    summary_prompt = """ Here is the content of the section:
+    summary_prompt = """ Here is the content of the section, which is from a solution brief by SuperMicro:
 
     {context_str}
 
-    Provide a Summary of key topics, entities, products, software, hardware, and solutions discussed in this section.
+    Provide a Summary of the section. Also, identify the specific companies, technology products, software, hardware (GPUs, CPUs, memory, accelerators, etc), and solutions discussed in this section.
 
     Summary: 
 
@@ -109,17 +123,17 @@ def create_metadata_extractors():
         num_workers=os.cpu_count()
     )
 
-    key_words = KeywordExtractor(
-        keywords=5,
-        num_workers=os.cpu_count()
-    )
+    # key_words = KeywordExtractor(
+    #     keywords=5,
+    #     num_workers=os.cpu_count()
+    # )
     
-    extractors = [text_splitter, summary, key_words, qa_extractor]
+    extractors = [text_splitter, summary, qa_extractor]
     
     return extractors
     
 def build_pipeline(transforms):
-    return IngestionPipeline(transformations=transforms)
+    return IngestionPipeline(transformations=transforms, num_workers=os.cpu_count())
 
 def build_nodes(documents, pipeline, transforms):
     pipeline = pipeline
@@ -130,12 +144,44 @@ def build_nodes(documents, pipeline, transforms):
         num_workers=os.cpu_count()
         )
     return nodes
+
+def create_vector_store(nodes) -> NoReturn:
+    client = qdrant_client.QdrantClient(path="/home/demotime/DeciLM_RAG_Demo/vector_store")
+    vector_store = QdrantVectorStore(
+        client=client, 
+        collection_name="SuperMicro Solutions Briefs",
+        path="../vector_store"
+        )
+    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+    index = VectorStoreIndex(nodes ,storage_context=storage_context)
+    index.storage_context.persist(persist_dir="/home/demotime/DeciLM_RAG_Demo/vector_store")
     
-def main():
+def main() -> NoReturn:
+    """Main function to orchestrate the document processing pipeline."""
+    # Setup the environment and models
     setup()
-    transforms = create_metadata_extractors()
-    pipeline = build_pipeline(transforms)
-    cleaned_pdfs = cleaning_utils.clean_and_prepare_texts('../SuperMicro_Solution_Brief')
-    documents = create_documents_from_clean_text(cleaned_pdfs)
-    nodes = build_nodes(documents, pipeline, transforms)
+    logging.info("Setup completed.")
+
+    # Create metadata extractors and build the ingestion pipeline
+    metadata_extractors = create_metadata_extractors()
+    pipeline = build_pipeline(metadata_extractors)
+    logging.info("Pipeline built.")
+
+    # Path to the directory containing documents to be processed
+    documents_dir = Path('/home/demotime/DeciLM_RAG_Demo/SuperMicro_Solution_Brief')
     
+    # Clean and prepare texts
+    cleaned_texts = cleaning_utils.clean_and_prepare_texts(documents_dir)
+    logging.info(f"Cleaned and prepared {len(cleaned_texts)} documents.")
+
+    # Create documents from cleaned texts
+    documents = create_documents_from_clean_text(cleaned_texts)
+    
+    # Process documents through the pipeline and create vector store
+    nodes = build_nodes(documents, pipeline, metadata_extractors)
+    create_vector_store(nodes)
+    logging.info("Vector store created successfully.")
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    main()
