@@ -133,15 +133,14 @@ def create_metadata_extractors():
     return extractors
     
 def build_pipeline(transforms):
-    return IngestionPipeline(transformations=transforms, num_workers=os.cpu_count())
+    return IngestionPipeline(transformations=transforms)
 
 def build_nodes(documents, pipeline, transforms):
     pipeline = pipeline
     nodes = pipeline.run(
         documents=documents,
         in_place=True,
-        show_progress=True,
-        num_workers=os.cpu_count()
+        show_progress=True
         )
     return nodes
 
