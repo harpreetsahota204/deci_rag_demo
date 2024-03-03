@@ -1,8 +1,8 @@
+import argparse
 import logging
-import warnings
 from pathlib import Path
 from typing import List, Union
-
+import warnings
 # Suppress all warnings
 warnings.filterwarnings("ignore")
 
@@ -18,7 +18,6 @@ from llama_index.retrievers.bm25 import BM25Retriever
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 
 import setup_utils
-
 
 def get_nodes_from_vector_store(index: VectorStoreIndex) -> List:
     """
@@ -140,8 +139,6 @@ def create_query_engine(retriever, post_processors:List):
     )
     return query_engine
 
-import argparse
-
 def initialize_system():
     """
     Initializes the chatbot system by setting up models and indices.
@@ -170,6 +167,7 @@ def handle_query(query_engine):
         if user_input.lower() == 'exit':
             break
         query_engine.query(user_input).print_response_stream()
+        print("\n")
 
 def main():
     parser = argparse.ArgumentParser(description="Chatbot System")
