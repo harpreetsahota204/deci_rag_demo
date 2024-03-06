@@ -57,15 +57,13 @@ def create_documents_from_clean_text(cleaned_texts: List[Tuple[str, Dict]]) -> L
     return documents
 
 def create_metadata_extractors():
-    qa_prompt = """ Here is the contextual information from a solution brief by SuperMicro:
+    qa_prompt = """ You are a question generating assistant. Here is the contextual information from a solution brief by SuperMicro:
     {context_str}
 
-    Given the contextual information, generate {num_questions} to the point questions this context can provide \
-    specific answers about the products, software, hardware, and solutions discussed in this document\
-    which are unlikely to be found elsewhere.
-
-    Higher-level summaries of the surrounding context may be provided as well.  Try using these summaries to generate better questions that this context can answer.\
-    Ensure that your questions are detailed, yet to the point, and are about the specific products, software, hardware, and solutions discussed in this document"""
+    Given the contextual information, generate {num_questions} about the specific answers about the services, products, software, hardware, and \
+    solutions discussed in this document which are unlikely to be found elsewhere. Higher-level summaries of the surrounding context may \
+    be provided as well.  Try using these summaries to generate better questions that this context can answer.\
+    Make your questions detailed, concise, and related to specific services, products, software, hardware, and solutions discussed in this document"""
 
     summary_prompt = """ Here is the content of the section, which is from a solution brief by SuperMicro:
 
@@ -79,22 +77,21 @@ def create_metadata_extractors():
     text_splitter = TokenTextSplitter(
         separator=" ", 
         chunk_size=512, 
-        chunk_overlap=8,
-        
+        chunk_overlap=32,   
     )
 
     qa_extractor = QuestionsAnsweredExtractor(
-        questions=5, 
+        questions=3, 
         prompt_template=qa_prompt,
         num_workers=os.cpu_count(),
-        kwargs = {"temperature":0.25, "max_length":128}
+        kwargs = {"max_length":128}
     )
 
     summary = SummaryExtractor(
         summaries = ["self"], 
         prompt_template=summary_prompt,
         num_workers=os.cpu_count(),
-        kwargs = {"temperature":0.25, "max_length":128}
+        kwargs = {"max_length":128}
     )
     extractors = [text_splitter, summary, qa_extractor]
     
@@ -149,13 +146,16 @@ def create_vector_store(nodes,
         batch_size=256,
         parallel=4,
         )
+    
     docstore = SimpleDocumentStore()
     
     storage_context = StorageContext.from_defaults(vector_store=vector_store, docstore=docstore)
     
     index = VectorStoreIndex(nodes, storage_context=storage_context)
+    docstore.add_documents(nodes)
     
     index.storage_context.persist(persist_dir=persist_path)
+    docstore.persist(persist_path=persist_path+'/docstore.json')
     
 def main() -> NoReturn:
     """Main function to orchestrate the document processing pipeline."""

@@ -12,9 +12,10 @@ def setup_llm(
     model_name: str = "Deci/DeciLM-7B-instruct",
     device_map: str = "xpu",
     context_window: int = 4096,
-    gen_kwargs: Dict = {"temperature": 0.25, "do_sample": True, "top_p":0.80},
+    max_length: int =1024,
+    gen_kwargs: Dict = {"temperature": 0.1, "do_sample": True},
     is_chat_model: bool = True,
-    tokenizer_kwargs= {"max_length": 4096},
+    tokenizer_kwargs= {"pad_token_id": 2, "eos_token_id":2},
     model_kwargs: Dict ={"torch_dtype": "auto", "trust_remote_code":True, "cache_dir":"/home/demotime/DeciLM_RAG_Demo/llms"},
     system_prompt: str = "You are an AI assistant that follows instructions extremely well. Help as much as you can."
     ) -> NoReturn:

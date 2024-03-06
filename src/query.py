@@ -34,7 +34,7 @@ def get_nodes_from_vector_store(index: VectorStoreIndex) -> List:
     return nodes 
 
 
-def create_bm25_retriever(nodes: List, similarity_top_k: int = 15) -> BM25Retriever:
+def create_bm25_retriever(nodes: List, similarity_top_k: int = 7) -> BM25Retriever:
     """
     Creates a BM25Retriever instance.
 
@@ -48,8 +48,7 @@ def create_bm25_retriever(nodes: List, similarity_top_k: int = 15) -> BM25Retrie
     retriever = BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=similarity_top_k)
     return retriever
 
-
-def create_vector_retriever(index: VectorStoreIndex, similarity_top_k: int = 15) -> VectorIndexRetriever:
+def create_vector_retriever(index: VectorStoreIndex, similarity_top_k: int = 7) -> VectorIndexRetriever:
     """
     Creates a VectorIndexRetriever instance.
 
@@ -103,7 +102,7 @@ class HybridRetriever(BaseRetriever):
         return all_nodes
 
 def create_reranker(
-    top_n :int = 5,
+    top_n :int = 4,
     model:str = "cross-encoder/ms-marco-MiniLM-L-2-v2",
     device:str = "xpu"):
     """
@@ -131,7 +130,7 @@ def create_query_engine(retriever, post_processors:List):
     Returns:
     - An instance of RetrieverQueryEngine.
     """   
-    synth = get_response_synthesizer(streaming=True)
+    synth = get_response_synthesizer(streaming=True, response_mode="tree_summarize")
     query_engine = RetrieverQueryEngine.from_args(
         retriever=retriever,
         node_postprocessors=post_processors,
@@ -146,28 +145,37 @@ def initialize_system():
     """
     setup_utils.setup_llm()
     setup_utils.setup_embed_model()
-    index = setup_utils.setup_index()
-    
+    client = qdrant_client.QdrantClient(path="/home/demotime/DeciLM_RAG_Demo/vector_store")
+    vector_store = QdrantVectorStore(client=client, collection_name="SuperMicro Solutions Briefs", enable_hybrid=True)
+    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+    index = VectorStoreIndex.from_vector_store(vector_store=vector_store, storage_context=storage_context)
     nodes = get_nodes_from_vector_store(index)
-    bm25_retriever = create_bm25_retriever(nodes, 7)
+    bm25_retriever = create_bm25_retriever(nodes)
     vector_retriever = create_vector_retriever(index)
     hybrid_retriever = HybridRetriever(vector_retriever, bm25_retriever)
     reranker = create_reranker()
     query_engine = create_query_engine(hybrid_retriever, [reranker])
-    return query_engine
+    return query_engine, client
 
-def handle_query(query_engine):
+def handle_query(query_engine, client):
     """
     Enters an interactive mode where the user can type queries, and the system responds.
-    Loops until the user types 'exit'.
+    Loops until the user types 'exit' or hits Control+C to quit.
     """
-    print("Enter your query or type 'exit' to quit:")
-    while True:
-        user_input = input("👨>")
-        if user_input.lower() == 'exit':
-            break
-        query_engine.query(user_input).print_response_stream()
-        print("\n")
+    print("Enter your query or type 'exit' to quit. You can also hit Control+C to exit:")
+    try:
+        while True:
+            user_input = input("👨> ")
+            if user_input.lower() == 'exit':
+                print("Session ended. 👋🏽")
+                break  # Exit the loop
+            query_engine.query(user_input).print_response_stream()
+            print("\n")
+    except KeyboardInterrupt:
+        print("\nExiting due to KeyboardInterrupt... 👋🏽")
+    finally:
+        client.close()  # Ensure the client is closed when exiting the loop or on exception
+
 
 def main():
     parser = argparse.ArgumentParser(description="Chatbot System")
@@ -175,11 +183,11 @@ def main():
     args = parser.parse_args()
 
     if args.mode == 'init':
-        query_engine = initialize_system()
+        query_engine, client = initialize_system()
         print("System initialized. You can now start querying.")
     elif args.mode == 'query':
-        query_engine = initialize_system()  # Assuming you have a way to load or persist the engine state.
-        handle_query(query_engine)
+        query_engine, client = initialize_system()  # Assuming you have a way to load or persist the engine state.
+        handle_query(query_engine, client)
 
 if __name__ == "__main__":
     main()
