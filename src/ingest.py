@@ -93,6 +93,7 @@ def create_metadata_extractors():
         num_workers=os.cpu_count(),
         kwargs = {"max_length":128}
     )
+    
     extractors = [text_splitter, summary, qa_extractor]
     
     return extractors
@@ -101,13 +102,14 @@ def build_pipeline(transforms):
     ingest_cache = IngestionCache(collection="SuperMicro")
     return IngestionPipeline(transformations=transforms, cache=ingest_cache)
 
-def build_nodes(documents, pipeline, transforms):
+def build_nodes(documents, pipeline):
     pipeline = pipeline
     nodes = pipeline.run(
         documents=documents,
         in_place=True,
         show_progress=True
         )
+    pipeline.persist()
     return nodes
 
 
@@ -183,7 +185,7 @@ def main() -> NoReturn:
     documents = create_documents_from_clean_text(cleaned_texts)
     
     # Process documents through the pipeline and create vector store
-    nodes = build_nodes(documents, pipeline, metadata_extractors)
+    nodes = build_nodes(documents, pipeline)
 
     create_vector_store(nodes)
     logging.info("Vector store created successfully.")
