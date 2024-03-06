@@ -5,12 +5,13 @@ from typing import List, Tuple, Dict, NoReturn
 
 from llama_index.core import  Document, Settings, VectorStoreIndex, StorageContext
 from llama_index.core.extractors import QuestionsAnsweredExtractor, SummaryExtractor
-from llama_index.core.ingestion import IngestionPipeline
+from llama_index.core.ingestion import IngestionPipeline, IngestionCache
 from llama_index.core.node_parser import TokenTextSplitter
+from llama_index.core.storage.docstore import SimpleDocumentStore
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.huggingface import HuggingFaceLLM
 from llama_index.vector_stores.qdrant import QdrantVectorStore
-
+from llama_index.core.ingestion import IngestionCache
 import qdrant_client
 
 import cleaning_utils
@@ -77,33 +78,31 @@ def create_metadata_extractors():
     """
     text_splitter = TokenTextSplitter(
         separator=" ", 
-        chunk_size=612, 
-        chunk_overlap=8
+        chunk_size=512, 
+        chunk_overlap=8,
+        
     )
 
     qa_extractor = QuestionsAnsweredExtractor(
         questions=5, 
         prompt_template=qa_prompt,
-        num_workers=os.cpu_count()
+        num_workers=os.cpu_count(),
+        kwargs = {"temperature":0.25, "max_length":128}
     )
 
     summary = SummaryExtractor(
         summaries = ["self"], 
         prompt_template=summary_prompt,
-        num_workers=os.cpu_count()
+        num_workers=os.cpu_count(),
+        kwargs = {"temperature":0.25, "max_length":128}
     )
-
-    # key_words = KeywordExtractor(
-    #     keywords=5,
-    #     num_workers=os.cpu_count()
-    # )
-    
     extractors = [text_splitter, summary, qa_extractor]
     
     return extractors
-    
+
 def build_pipeline(transforms):
-    return IngestionPipeline(transformations=transforms)
+    ingest_cache = IngestionCache(collection="SuperMicro")
+    return IngestionPipeline(transformations=transforms, cache=ingest_cache)
 
 def build_nodes(documents, pipeline, transforms):
     pipeline = pipeline
@@ -113,6 +112,7 @@ def build_nodes(documents, pipeline, transforms):
         show_progress=True
         )
     return nodes
+
 
 def create_vector_store(nodes, 
                         persist_path: str = "/home/demotime/DeciLM_RAG_Demo/vector_store",
@@ -140,15 +140,22 @@ def create_vector_store(nodes,
         This function does not return any value. It creates and persists the vector store as a side effect.
     """
     client = qdrant_client.QdrantClient(path=persist_path)
+    
     vector_store = QdrantVectorStore(
         client=client, 
         collection_name=collection_name,
-        path=persist_path
+        path=persist_path,
+        enable_hybrid=True, 
+        batch_size=256,
+        parallel=4,
         )
-    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+    docstore = SimpleDocumentStore()
+    
+    storage_context = StorageContext.from_defaults(vector_store=vector_store, docstore=docstore)
+    
     index = VectorStoreIndex(nodes, storage_context=storage_context)
+    
     index.storage_context.persist(persist_dir=persist_path)
-
     
 def main() -> NoReturn:
     """Main function to orchestrate the document processing pipeline."""
@@ -164,7 +171,7 @@ def main() -> NoReturn:
     setup_utils.setup_llm()
     logging.info(f"LLM setup complete, using {Settings.llm.model_name}")
     
-    setup_utils.embed_model()
+    setup_utils.setup_embed_model()
     logging.info(f"Embedding model setup complete, using {Settings.embed_model.model_name}")
 
     # Create metadata extractors and build the ingestion pipeline
@@ -177,6 +184,7 @@ def main() -> NoReturn:
     
     # Process documents through the pipeline and create vector store
     nodes = build_nodes(documents, pipeline, metadata_extractors)
+
     create_vector_store(nodes)
     logging.info("Vector store created successfully.")
 
