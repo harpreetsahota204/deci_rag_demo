@@ -112,7 +112,6 @@ def build_nodes(documents, pipeline):
     pipeline.persist()
     return nodes
 
-
 def create_vector_store(nodes, 
                         persist_path: str = "/home/demotime/DeciLM_RAG_Demo/vector_store",
                         collection_name: str = "SuperMicro Solutions Briefs") -> NoReturn:

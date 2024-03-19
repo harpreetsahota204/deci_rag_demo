@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from typing import List, Tuple, Dict, NoReturn
-# import intel_extension_for_pytorch as ipex
+import intel_extension_for_pytorch as ipex
 
 from llama_index.core import Settings
 
